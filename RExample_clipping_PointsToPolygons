@@ -1,0 +1,96 @@
+#######################################################
+###Example Code - Clipping Spatial Points by Polygon###
+########Code by Corey Krabbenhoft - April 2022#########
+#######################################################
+
+###In this example, we will take a set of points for lakes across the US
+###and clip them to only those that occur in Minnesota. Then we clip them 
+###further to only those in the Ceded Territories
+
+
+##set working directory to the folder that contains your data files
+setwd("/Users/Corey2/Desktop/") #note this syntax will be slightly different on Mac vs PC
+
+##############
+#BUILDING OFF OF CODE FROM HOLLY AND CHRIS
+
+library(tidyverse)
+library(plotly) 
+library(maps) # to pull in the map data for geom_polygon
+library(sp) # to create spatial polygons
+library(rgdal) # to read in shapefiles
+
+#read in lat/long data from a csv
+usa.lakes<-read.csv('Lake_data_NorthAmerica_HydroLAKES.csv', header=T) #all lakes in North America from NHD
+
+#create basic MN map with points from csv added
+all_states <- map_data("state")
+states <- subset(all_states, region %in% c("minnesota"))
+minnesota <- subset(states, region %in% c("minnesota"))
+
+usa_point_map <- ggplot() + 
+  geom_polygon(data = minnesota, aes(x = long, y = lat, group = group), fill = "slategray1", color = "gray50", alpha = .75) +
+  geom_point(data = usa.lakes, aes(x = Pour_long, y = Pour_lat)) + #adjust x and y names to column names of lat/long info
+  coord_fixed(1.3)+ 
+  theme_classic()
+
+usa_point_map #show the map
+
+#In order to do the clip, the MN outline needs to be a polygon. Currently it is a dataframe.
+
+#So we convert minnesota dataframe into a spatial polygon to get state outline as its own object
+mn.polygon = Polygon(minnesota[,1:2]) # 1 and 2 denote the columns where the lat/long info is
+mn.ps = Polygons(list(mn.polygon),1)
+mn.sps = SpatialPolygons(list(mn.ps))
+proj4string(mn.sps) <- CRS("+proj=longlat +datum=WGS84") #set the projection for MN outline to WGS84
+
+#Similarly, we convert the point dataframe (from our csv) into spatial object 
+lakes.coord<-usa.lakes[,21:22] #columns 21 and 22 are long/lat
+pts <- SpatialPointsDataFrame(coords = lakes.coord, data = usa.lakes,proj4string = CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+
+#Now we can use the spatial objects to clip the US lakes data to get only only those that occur in Minnesota
+mn.lakes.sp <- pts[mn.sps,]
+mn.lakes.data<-data.frame(mn.lakes.sp@data) # extract mn lakes data for mapping
+
+#Finally, create a map of MN with only MN lakes shown
+mn_lakes_map <- mn.lakes.data %>%
+  ggplot() +
+  geom_polygon(data = minnesota, mapping = aes(x = long, y = lat, group = group),
+               color = "black", fill = "gray") +
+  geom_point(aes(x = Pour_long, y = Pour_lat, color = Lake_area), alpha = 0.75) +
+  coord_fixed(1.3) +
+  theme_classic()  
+ 
+mn_lakes_map #plot the map
+
+
+#######Now subset lake points by those contained in ceded territories
+
+#read in the shapefile that contains your polygon (this is from https://data.glifwc.org/ceded/)
+ceded= readOGR("/Users/Corey2/Desktop/Hansen Lab/Spatial Synchrony/Ceded_territories/Ceded_territories_v2_1_polygons.shp")
+
+#change projection of ceded territories shapefile to WGS84 to match other layers:
+ceded.wgs<- spTransform(ceded, CRS("+proj=longlat +datum=WGS84")) #change projection to wgs84
+
+#show map with ceded territory outline
+mn_lakes_map + geom_polygon(data = ceded.wgs, aes(x = long, y = lat, group = group), colour = "red", fill = NA)
+
+
+#clip the pts spatial object by the ceded territories polygon
+mn.ceded.lakes <- mn.lakes.sp[ceded.wgs,]
+
+#get ceded lakes point data
+mn.ceded.data<-data.frame(mn.ceded.lakes@data)
+
+#now map the subset of points
+ceded_lakes_map <- mn.ceded.data %>%
+  ggplot() +
+  geom_polygon(data = minnesota, mapping = aes(x = long, y = lat, group = group),
+               color = "black", fill = "gray") +
+  geom_point(aes(x = Pour_long, y = Pour_lat, color = Lake_area), alpha = 0.75) +
+  coord_fixed(1.3) + theme_classic()
+
+ceded_lakes_map #plot the new map
+
+
